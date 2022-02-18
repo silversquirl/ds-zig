@@ -63,29 +63,33 @@ pub fn AvlTree(
             self.addContext(node, undefined);
         }
         pub fn addContext(self: *Self, node: *Node, ctx: Context) void {
-            _ = addToSubtree(&self.root, node, ctx);
-        }
-        fn addToSubtree(root_opt: *?*Node, node: *Node, ctx: Context) i2 {
             node.balance = 0;
             node.left = null;
             node.right = null;
 
+            _ = addToSubtree(&self.root, node, ctx);
+        }
+        fn addToSubtree(root_opt: *?*Node, node: *Node, ctx: Context) i2 {
             // Insert node
-            const root = &(root_opt.* orelse {
+            var root = (root_opt.* orelse {
                 root_opt.* = node;
                 return 1;
             });
-            if (lessThan(ctx, node.key, root.*.key)) {
-                const bal = addToSubtree(&root.*.left, node, ctx);
-                return balance(bal, root, .left);
-            } else if (lessThan(ctx, root.*.key, node.key)) {
-                const bal = addToSubtree(&root.*.right, node, ctx);
-                return balance(bal, root, .right);
+            if (lessThan(ctx, node.key, root.key)) {
+                const bal = addToSubtree(&root.left, node, ctx);
+                const ret = balance(bal, &root, .left);
+                root_opt.* = root;
+                return ret;
+            } else if (lessThan(ctx, root.key, node.key)) {
+                const bal = addToSubtree(&root.right, node, ctx);
+                const ret = balance(bal, &root, .right);
+                root_opt.* = root;
+                return ret;
             } else {
                 // Replace root
-                node.balance = root.*.balance;
-                node.left = root.*.left;
-                node.right = root.*.right;
+                node.balance = root.balance;
+                node.left = root.left;
+                node.right = root.right;
                 root_opt.* = node;
                 return 0;
             }
@@ -167,7 +171,7 @@ pub fn AvlTree(
 }
 
 test "insertion and array list building" {
-    const Tree = AvlTree(i32, i64, void, comptime std.sort.desc(i32));
+    const Tree = AvlTree(i32, i64, void, comptime std.sort.asc(i32));
     var tree = Tree{};
     var n0 = Tree.Node{
         .key = 7,
