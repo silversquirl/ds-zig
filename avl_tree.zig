@@ -27,7 +27,7 @@ pub fn AvlTree(
         pub fn buildArrayList(self: *Self, list: *std.ArrayList(KV)) !void {
             try buildArrayListInternal(self.root, list);
         }
-        pub fn buildArrayListInternal(node_opt: ?*Node, list: *std.ArrayList(KV)) std.mem.Allocator.Error!void {
+        fn buildArrayListInternal(node_opt: ?*Node, list: *std.ArrayList(KV)) std.mem.Allocator.Error!void {
             if (node_opt) |node| {
                 try buildArrayListInternal(node.left, list);
                 try list.append(node.kv());
@@ -86,12 +86,7 @@ pub fn AvlTree(
                 root_opt.* = root;
                 return ret;
             } else {
-                // Replace root
-                node.balance = root.balance;
-                node.left = root.left;
-                node.right = root.right;
-                root_opt.* = node;
-                return 0;
+                unreachable; // Can't safely replace nodes because we might lose memory
             }
         }
 
