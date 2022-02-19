@@ -94,7 +94,7 @@ pub fn AvlTree(
                 unreachable; // Can't safely replace nodes because we might lose memory
 
             const bal = addToSubtree(getChild(root, side), node, ctx);
-            const ret = balance(bal, &root, side);
+            const ret = balance(bal, &root, side, ctx);
 
             if (comptime hasFunc(Context, "balance")) {
                 ctx.balance(root);
@@ -113,27 +113,27 @@ pub fn AvlTree(
         }
 
         /// Rebalance a subtree after adding a node
-        fn balance(child_balance: i2, parent: **Node, child: Side) i2 {
+        fn balance(child_balance: i2, parent: **Node, child: Side, ctx: Context) i2 {
             if (child_balance == 0) return 0;
             switch (child) {
                 .right => if (parent.*.balance <= 0) {
                     parent.*.balance += 1;
                 } else if (child_balance >= 0) {
                     // right right violation
-                    rotate(parent, .left);
+                    rotate(parent, .left, ctx);
                 } else {
                     // right left violation
-                    rotate(parent, .right_left);
+                    rotate(parent, .right_left, ctx);
                 },
 
                 .left => if (parent.*.balance >= 0) {
                     parent.*.balance -= 1;
                 } else if (child_balance <= 0) {
                     // left left violation
-                    rotate(parent, .right);
+                    rotate(parent, .right, ctx);
                 } else {
                     // left right violation
-                    rotate(parent, .left_right);
+                    rotate(parent, .left_right, ctx);
                 },
             }
             return parent.*.balance;
@@ -141,90 +141,109 @@ pub fn AvlTree(
         const Side = enum { right, left };
 
         // Perform a rebalancing rotation
-        fn rotate(x: **Node, rot: Rotation) void {
+        fn rotate(root: **Node, rot: Rotation, ctx: Context) void {
+            const x = root.*;
             switch (rot) {
                 .right => {
-                    const z = x.*.left.?;
+                    const z = x.left.?;
 
-                    std.debug.assert(x.*.balance < 0);
+                    x.left = z.right;
+                    z.right = x;
+                    root.* = z;
+
+                    std.debug.assert(x.balance < 0);
                     std.debug.assert(z.balance <= 0);
                     if (z.balance == 0) {
-                        x.*.balance = -1;
+                        x.balance = -1;
                         z.balance = 1;
                     } else {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = 0;
                     }
 
-                    x.*.left = z.right;
-                    z.right = x.*;
-                    x.* = z;
+                    if (comptime hasFunc(Context, "balance")) {
+                        ctx.balance(x);
+                    }
                 },
 
                 .left => {
-                    const z = x.*.right.?;
+                    const z = x.right.?;
 
-                    std.debug.assert(x.*.balance > 0);
+                    x.right = z.left;
+                    z.left = x;
+                    root.* = z;
+
+                    std.debug.assert(x.balance > 0);
                     std.debug.assert(z.balance >= 0);
                     if (z.balance == 0) {
-                        x.*.balance = 1;
+                        x.balance = 1;
                         z.balance = -1;
                     } else {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = 0;
                     }
 
-                    x.*.right = z.left;
-                    z.left = x.*;
-                    x.* = z;
+                    if (comptime hasFunc(Context, "balance")) {
+                        ctx.balance(x);
+                    }
                 },
 
                 .right_left => {
-                    const z = x.*.right.?;
+                    const z = x.right.?;
                     const y = z.left.?;
 
-                    std.debug.assert(x.*.balance > 0);
+                    z.left = y.right;
+                    x.right = y.left;
+                    y.right = z;
+                    y.left = x;
+                    root.* = y;
+
+                    std.debug.assert(x.balance > 0);
                     std.debug.assert(z.balance < 0);
                     if (y.balance == 0) {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = 0;
                     } else if (y.balance > 0) {
-                        x.*.balance = -1;
+                        x.balance = -1;
                         z.balance = 0;
                     } else {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = 1;
                     }
 
-                    z.left = y.right;
-                    x.*.right = y.left;
-                    y.right = z;
-                    y.left = x.*;
-                    x.* = y;
+                    if (comptime hasFunc(Context, "balance")) {
+                        ctx.balance(x);
+                        ctx.balance(z);
+                    }
                 },
 
                 .left_right => {
-                    const z = x.*.left.?;
+                    const z = x.left.?;
                     const y = z.right.?;
 
-                    std.debug.assert(x.*.balance < 0);
+                    z.right = y.left;
+                    x.left = y.right;
+                    y.left = z;
+                    y.right = x;
+                    root.* = y;
+
+                    std.debug.assert(x.balance < 0);
                     std.debug.assert(z.balance > 0);
                     if (y.balance == 0) {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = 0;
                     } else if (y.balance > 0) {
-                        x.*.balance = 1;
+                        x.balance = 1;
                         z.balance = 0;
                     } else {
-                        x.*.balance = 0;
+                        x.balance = 0;
                         z.balance = -1;
                     }
 
-                    z.right = y.left;
-                    x.*.left = y.right;
-                    y.left = z;
-                    y.right = x.*;
-                    x.* = y;
+                    if (comptime hasFunc(Context, "balance")) {
+                        ctx.balance(x);
+                        ctx.balance(z);
+                    }
                 },
             }
         }
@@ -271,7 +290,7 @@ pub fn AvlTree(
         fn hasFunc(comptime T: type, comptime name: []const u8) bool {
             return switch (@typeInfo(T)) {
                 .Pointer => |p| hasFunc(p.child, name),
-                else => std.meta.trait.hasFn("name")(T),
+                else => std.meta.trait.hasFn(name)(T),
             };
         }
     };
