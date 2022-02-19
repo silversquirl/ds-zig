@@ -1,11 +1,10 @@
-//! Array-backed AVL tree
 const std = @import("std");
 
 /// Context can contain any of the following functions, and must contain at least `less`:
 ///
-///  fn less(Context, a: K, b: K) bool
+///  pub fn less(Context, a: K, b: K) bool
 ///     Returns a < b
-///  fn balance(Context, node: *Node) void
+///  pub fn balance(Context, node: *Node) void
 ///     Called whenever node's children change.
 ///     Useful for implementing more complex tree datastructures on top of the AVL tree.
 ///
@@ -43,13 +42,13 @@ pub fn AvlTree(
         }
         pub const KV = struct { key: K, value: V };
 
-        pub fn find(self: *Self, key: K) ?*Node {
+        pub fn find(self: Self, key: K) ?*Node {
             if (@sizeOf(Context) != 0) {
                 @compileError("Cannot infer context " ++ @typeName(Context) ++ ", call findContext instead.");
             }
             self.findContext(key, undefined);
         }
-        pub fn findContext(self: *Self, key: K, ctx: Context) ?*Node {
+        pub fn findContext(self: Self, key: K, ctx: Context) ?*Node {
             var node_opt = self.root;
             while (node_opt) |node| {
                 if (ctx.less(key, node)) {
@@ -79,9 +78,14 @@ pub fn AvlTree(
         fn addToSubtree(root_opt: *?*Node, node: *Node, ctx: Context) i2 {
             // Insert node
             var root = (root_opt.* orelse {
+                if (comptime hasFunc(Context, "balance")) {
+                    ctx.balance(node);
+                }
+
                 root_opt.* = node;
                 return 1;
             });
+
             const side: Side = if (ctx.less(node.key, root.key))
                 .left
             else if (ctx.less(root.key, node.key))
@@ -91,6 +95,7 @@ pub fn AvlTree(
 
             const bal = addToSubtree(getChild(root, side), node, ctx);
             const ret = balance(bal, &root, side);
+
             if (comptime hasFunc(Context, "balance")) {
                 ctx.balance(root);
             }
@@ -140,6 +145,17 @@ pub fn AvlTree(
             switch (rot) {
                 .right => {
                     const z = x.*.left.?;
+
+                    std.debug.assert(x.*.balance < 0);
+                    std.debug.assert(z.balance <= 0);
+                    if (z.balance == 0) {
+                        x.*.balance = -1;
+                        z.balance = 1;
+                    } else {
+                        x.*.balance = 0;
+                        z.balance = 0;
+                    }
+
                     x.*.left = z.right;
                     z.right = x.*;
                     x.* = z;
@@ -147,6 +163,17 @@ pub fn AvlTree(
 
                 .left => {
                     const z = x.*.right.?;
+
+                    std.debug.assert(x.*.balance > 0);
+                    std.debug.assert(z.balance >= 0);
+                    if (z.balance == 0) {
+                        x.*.balance = 1;
+                        z.balance = -1;
+                    } else {
+                        x.*.balance = 0;
+                        z.balance = 0;
+                    }
+
                     x.*.right = z.left;
                     z.left = x.*;
                     x.* = z;
@@ -155,6 +182,20 @@ pub fn AvlTree(
                 .right_left => {
                     const z = x.*.right.?;
                     const y = z.left.?;
+
+                    std.debug.assert(x.*.balance > 0);
+                    std.debug.assert(z.balance < 0);
+                    if (y.balance == 0) {
+                        x.*.balance = 0;
+                        z.balance = 0;
+                    } else if (y.balance > 0) {
+                        x.*.balance = -1;
+                        z.balance = 0;
+                    } else {
+                        x.*.balance = 0;
+                        z.balance = 1;
+                    }
+
                     z.left = y.right;
                     x.*.right = y.left;
                     y.right = z;
@@ -165,6 +206,20 @@ pub fn AvlTree(
                 .left_right => {
                     const z = x.*.left.?;
                     const y = z.right.?;
+
+                    std.debug.assert(x.*.balance < 0);
+                    std.debug.assert(z.balance > 0);
+                    if (y.balance == 0) {
+                        x.*.balance = 0;
+                        z.balance = 0;
+                    } else if (y.balance > 0) {
+                        x.*.balance = 1;
+                        z.balance = 0;
+                    } else {
+                        x.*.balance = 0;
+                        z.balance = -1;
+                    }
+
                     z.right = y.left;
                     x.*.left = y.right;
                     y.left = z;
@@ -179,6 +234,39 @@ pub fn AvlTree(
             right_left,
             left_right,
         };
+
+        /// Assert that the tree is balanced, and that all balance factors are correct.
+        /// For debugging purposes.
+        pub fn checkIntegrity(self: Self) void {
+            _ = checkNodeIntegrity(self.root);
+        }
+        fn checkNodeIntegrity(node_opt: ?*Node) usize {
+            const node = node_opt orelse return 0;
+            if (node.balance < -1 or node.balance > 1) {
+                @panic("Corrupt balance factor");
+            }
+
+            const l = checkNodeIntegrity(node.left);
+            const r = checkNodeIntegrity(node.right);
+
+            if (l < r) {
+                if (r - l > 1) {
+                    @panic("Tree unbalanced");
+                }
+                if (node.balance != r - l) {
+                    @panic("Incorrect balance factor");
+                }
+            } else {
+                if (l - r > 1) {
+                    @panic("Tree unbalanced");
+                }
+                if (-node.balance != l - r) {
+                    @panic("Incorrect balance factor");
+                }
+            }
+
+            return @maximum(l, r) + 1;
+        }
 
         fn hasFunc(comptime T: type, comptime name: []const u8) bool {
             return switch (@typeInfo(T)) {
@@ -196,41 +284,93 @@ test "insertion and array list building" {
         }
     });
 
-    var tree = Tree{};
-    var n0 = Tree.Node{
-        .key = 7,
-        .value = 7 * 4 - 1,
-    };
-    var n1 = Tree.Node{
-        .key = 3,
-        .value = 3 * 4 - 1,
-    };
-    var n2 = Tree.Node{
-        .key = 5,
-        .value = 5 * 4 - 1,
-    };
-    var n3 = Tree.Node{
-        .key = 10,
-        .value = 10 * 4 - 1,
-    };
-    var n4 = Tree.Node{
-        .key = 2,
-        .value = 2 * 4 - 1,
-    };
+    {
+        var tree = Tree{};
+        var n0 = Tree.Node{
+            .key = 7,
+            .value = 7 * 4 - 1,
+        };
+        var n1 = Tree.Node{
+            .key = 3,
+            .value = 3 * 4 - 1,
+        };
+        var n2 = Tree.Node{
+            .key = 5,
+            .value = 5 * 4 - 1,
+        };
+        var n3 = Tree.Node{
+            .key = 10,
+            .value = 10 * 4 - 1,
+        };
+        var n4 = Tree.Node{
+            .key = 2,
+            .value = 2 * 4 - 1,
+        };
 
-    tree.add(&n0);
-    tree.add(&n1);
-    tree.add(&n2);
-    tree.add(&n3);
-    tree.add(&n4);
+        tree.add(&n0);
+        tree.checkIntegrity();
+        tree.add(&n1);
+        tree.checkIntegrity();
+        tree.add(&n2);
+        tree.checkIntegrity();
+        tree.add(&n3);
+        tree.checkIntegrity();
+        tree.add(&n4);
+        tree.checkIntegrity();
 
-    var list = std.ArrayList(Tree.KV).init(std.testing.allocator);
-    defer list.deinit();
-    try tree.buildArrayList(&list);
+        var list = std.ArrayList(Tree.KV).init(std.testing.allocator);
+        defer list.deinit();
+        try tree.buildArrayList(&list);
 
-    try std.testing.expectEqualSlices(Tree.KV, &.{
-        n4.kv(), n1.kv(),
-        n2.kv(), n0.kv(),
-        n3.kv(),
-    }, list.items);
+        try std.testing.expectEqualSlices(Tree.KV, &.{
+            n4.kv(), n1.kv(),
+            n2.kv(), n0.kv(),
+            n3.kv(),
+        }, list.items);
+    }
+
+    {
+        var tree = Tree{};
+        var n0 = Tree.Node{
+            .key = 0,
+            .value = 7 * 4 - 1,
+        };
+        var n1 = Tree.Node{
+            .key = 20,
+            .value = 3 * 4 - 1,
+        };
+        var n2 = Tree.Node{
+            .key = 7,
+            .value = 5 * 4 - 1,
+        };
+        var n3 = Tree.Node{
+            .key = 12,
+            .value = 10 * 4 - 1,
+        };
+        var n4 = Tree.Node{
+            .key = 1000,
+            .value = 2 * 4 - 1,
+        };
+
+        tree.add(&n0);
+        tree.checkIntegrity();
+        tree.add(&n1);
+        tree.checkIntegrity();
+        tree.add(&n2);
+        tree.checkIntegrity();
+        tree.add(&n3);
+        tree.checkIntegrity();
+        tree.add(&n4);
+        tree.checkIntegrity();
+
+        var list = std.ArrayList(Tree.KV).init(std.testing.allocator);
+        defer list.deinit();
+        try tree.buildArrayList(&list);
+
+        try std.testing.expectEqualSlices(Tree.KV, &.{
+            n0.kv(), n2.kv(),
+            n3.kv(), n1.kv(),
+            n4.kv(),
+        }, list.items);
+    }
 }
