@@ -1,11 +1,18 @@
 //! Array-backed AVL tree
 const std = @import("std");
 
+/// Context can contain any of the following functions, and must contain at least `less`:
+///
+///  fn less(Context, a: K, b: K) bool
+///     Returns a < b
+///  fn balance(Context, node: *Node) void
+///     Called whenever node's children change.
+///     Useful for implementing more complex tree datastructures on top of the AVL tree.
+///
 pub fn AvlTree(
     comptime K: type,
     comptime V: type,
     comptime Context: type,
-    comptime lessThan: fn (context: Context, lhs: K, rhs: K) bool,
 ) type {
     return struct {
         root: ?*Node = null,
@@ -45,9 +52,9 @@ pub fn AvlTree(
         pub fn findContext(self: *Self, key: K, ctx: Context) ?*Node {
             var node_opt = self.root;
             while (node_opt) |node| {
-                if (lessThan(ctx, key, node)) {
+                if (ctx.less(key, node)) {
                     node_opt = node.left;
-                } else if (lessThan(ctx, node, key)) {
+                } else if (ctx.less(node, key)) {
                     node_opt = node.right;
                 } else {
                     return node;
@@ -75,22 +82,32 @@ pub fn AvlTree(
                 root_opt.* = node;
                 return 1;
             });
-            if (lessThan(ctx, node.key, root.key)) {
-                const bal = addToSubtree(&root.left, node, ctx);
-                const ret = balance(bal, &root, .left);
-                root_opt.* = root;
-                return ret;
-            } else if (lessThan(ctx, root.key, node.key)) {
-                const bal = addToSubtree(&root.right, node, ctx);
-                const ret = balance(bal, &root, .right);
-                root_opt.* = root;
-                return ret;
-            } else {
+            const side: Side = if (ctx.less(node.key, root.key))
+                .left
+            else if (ctx.less(root.key, node.key))
+                .right
+            else
                 unreachable; // Can't safely replace nodes because we might lose memory
+
+            const bal = addToSubtree(getChild(root, side), node, ctx);
+            const ret = balance(bal, &root, side);
+            if (comptime hasFunc(Context, "balance")) {
+                ctx.balance(root);
             }
+
+            root_opt.* = root;
+            return ret;
         }
 
-        // Rebalance a subtree after adding a node
+        /// Return the specified child of a node
+        fn getChild(parent: *Node, side: Side) *?*Node {
+            return switch (side) {
+                .left => &parent.left,
+                .right => &parent.right,
+            };
+        }
+
+        /// Rebalance a subtree after adding a node
         fn balance(child_balance: i2, parent: **Node, child: Side) i2 {
             if (child_balance == 0) return 0;
             switch (child) {
@@ -162,11 +179,23 @@ pub fn AvlTree(
             right_left,
             left_right,
         };
+
+        fn hasFunc(comptime T: type, comptime name: []const u8) bool {
+            return switch (@typeInfo(T)) {
+                .Pointer => |p| hasFunc(p.child, name),
+                else => std.meta.trait.hasFn("name")(T),
+            };
+        }
     };
 }
 
 test "insertion and array list building" {
-    const Tree = AvlTree(i32, i64, void, comptime std.sort.asc(i32));
+    const Tree = AvlTree(i32, i64, struct {
+        pub fn less(_: @This(), a: i32, b: i32) bool {
+            return a < b;
+        }
+    });
+
     var tree = Tree{};
     var n0 = Tree.Node{
         .key = 7,
